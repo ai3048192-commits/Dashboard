@@ -29,7 +29,7 @@ const menuItems: MenuItem[] = [
   { name: "أعمالي", icon: Briefcase, path: "/portfolio" },
   { name: " التفاصيل اعمال ", icon: Award, path: "/partners" },
   { name: "الإعدادات", icon: Settings, path: "/settings" },
-  { name: "العودة للموقع", icon: Globe, path: "http://localhost:5173/" },
+  { name: "العودة للموقع", icon: Globe, path: "https://samhan10.vercel.app/" },
 ];
 
 interface SidebarProps {
