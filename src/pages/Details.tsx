@@ -1,16 +1,21 @@
 import React, { useState, useEffect } from "react";
-import { LayoutDashboard, Image, FileText, Trash2, Plus } from "lucide-react";
+import { LayoutDashboard, Trash2, Plus, Loader2, Edit3, Sparkles, Image as ImageIcon } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 
 const ProDashboard = () => {
-  // ===== States للمشاريع =====
-  const [items, setItems] = useState([]);
-  const [portfolios, setPortfolios] = useState([]);
-  const [pdfs, setPdfs] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [projects, setProjects] = useState([]); // قائمة المشاريع من قاعدة البيانات
+  const [selectedProjectId, setSelectedProjectId] = useState(() => {
+    const savedId = localStorage.getItem("selectedProjectId");
+    return savedId ? parseInt(savedId) : 1;
+  });
 
-  // ===== Input State للمشاريع الأساسية =====
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [uploadingItemImg, setUploadingItemImg] = useState(false);
+  const [editingItemId, setEditingItemId] = useState(null);
+
   const [itemInput, setItemInput] = useState({
+    project_id: selectedProjectId,
     name: "",
     description: "",
     image_url: "",
@@ -18,24 +23,6 @@ const ProDashboard = () => {
     category: "Brand Identity",
   });
 
-  // ===== Input State للمعرض (مرتبط بالمشروع + category) =====
-  const [portfolioInput, setPortfolioInput] = useState({
-    project_id: null,
-    description: "",
-    image_url: "",
-    category: "Brand Identity", // ✅ أضيفنا الـ category
-  });
-
-  // ===== Input State لـ PDF (مرتبط بالمشروع + category) =====
-  const [pdfInput, setPdfInput] = useState({
-    project_id: null,
-    title: "",
-    file_url: "",
-    preview_image: "",
-    category: "Brand Identity", // ✅ أضيفنا الـ category
-  });
-
-  // ===== فئات المشاريع =====
   const categories = [
     "Brand Identity",
     "Social Media Design",
@@ -45,73 +32,121 @@ const ProDashboard = () => {
     "Presentation Design",
   ];
 
-  // ===== جلب البيانات عند تحميل الصفحة =====
+  // 1. جلب قائمة المشاريع الأساسية من جدول portfolio_projects عند تحميل الصفحة
   useEffect(() => {
-    fetchAllData();
+    fetchProjects();
   }, []);
+
+  const fetchProjects = async () => {
+    try {
+      const { data, error } = await supabase.from("portfolio_projects").select("id, title");
+      if (error) throw error;
+      setProjects(data || []);
+      
+      // إذا كان الـ ID الحالي غير موجود، اختر أول مشروع متاح تلقائياً
+      if (data && data.length > 0 && !data.some(p => p.id === selectedProjectId)) {
+        const firstId = data[0].id;
+        setSelectedProjectId(firstId);
+        localStorage.setItem("selectedProjectId", firstId);
+      }
+    } catch (error) {
+      console.error("❌ خطأ في جلب المشاريع:", error);
+    }
+  };
+
+  // 2. تحديث الـ localStorage والحقل عند تغيير المشروع من القائمة المنسدلة
+  const handleProjectChange = (e) => {
+    const newId = parseInt(e.target.value);
+    setSelectedProjectId(newId);
+    localStorage.setItem("selectedProjectId", newId);
+    setItemInput(prev => ({ ...prev, project_id: newId }));
+  };
+
+  // 3. جلب العناصر المرتبطة بالمشروع المحدد
+  useEffect(() => {
+    if (selectedProjectId) {
+      fetchAllData();
+      setItemInput(prev => ({ ...prev, project_id: selectedProjectId }));
+    }
+  }, [selectedProjectId]);
 
   const fetchAllData = async () => {
     try {
       setLoading(true);
-      console.log("🔄 جاري جلب البيانات...");
-
-      // جلب المشاريع
       const { data: itemsData, error: itemsError } = await supabase
         .from("items")
         .select("*")
+        .eq("project_id", selectedProjectId)
         .order("id", { ascending: false });
 
       if (itemsError) throw itemsError;
       setItems(itemsData || []);
-
-      // جلب المعرض
-      const { data: portfoliosData, error: portfoliosError } = await supabase
-        .from("portfolios")
-        .select("*")
-        .order("id", { ascending: false });
-
-      if (portfoliosError) console.warn("خطأ في جلب المعرض:", portfoliosError);
-      setPortfolios(portfoliosData || []);
-
-      // جلب الـ PDFs
-      const { data: pdfsData, error: pdfsError } = await supabase
-        .from("pdfs")
-        .select("*")
-        .order("id", { ascending: false });
-
-      if (pdfsError) console.warn("خطأ في جلب الـ PDFs:", pdfsError);
-      setPdfs(pdfsData || []);
-
-      console.log("✅ تم جلب البيانات بنجاح");
     } catch (error) {
       console.error("❌ خطأ:", error);
-      alert("❌ خطأ: " + error.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // ===== إضافة مشروع جديد =====
-  const addItem = async () => {
-    if (
-      !itemInput.name.trim() ||
-      !itemInput.description.trim() ||
-      !itemInput.image_url.trim()
-    ) {
-      alert("⚠️ يرجى ملء جميع الحقول المطلوبة");
+  const uploadFileToSupabase = async (e, setUploadingState, onSuccess) => {
+    try {
+      setUploadingState(true);
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const fileExt = file.name.split(".").pop();
+      const fileName = `${Math.random()}.${fileExt}`;
+      const filePath = `uploads/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("portfolio-bucket")
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage
+        .from("portfolio-bucket")
+        .getPublicUrl(filePath);
+
+      onSuccess(data.publicUrl);
+      alert("✅ تم الرفع بنجاح!");
+    } catch (error) {
+      alert("❌ خطأ أثناء الرفع: " + error.message);
+    } finally {
+      setUploadingState(false);
+    }
+  };
+
+  const handleSaveItem = async () => {
+    if (!itemInput.name.trim() || !itemInput.description.trim() || !itemInput.image_url.trim()) {
+      alert("⚠️ يرجى ملء جميع الحقول المطلوبة ورفع الصورة الرئيسية");
       return;
     }
 
     try {
       setLoading(true);
-      console.log("📝 جاري إضافة مشروع...");
+      const payload = {
+        project_id: selectedProjectId,
+        name: itemInput.name,
+        description: itemInput.description,
+        image_url: itemInput.image_url,
+        hero_image: itemInput.hero_image,
+        category: itemInput.category,
+      };
 
-      const { error } = await supabase.from("items").insert([itemInput]);
+      if (editingItemId) {
+        const { error } = await supabase.from("items").update(payload).eq("id", editingItemId);
+        if (error) throw error;
+        alert("✅ تم تحديث السجل بنجاح!");
+        setEditingItemId(null);
+      } else {
+        const { error } = await supabase.from("items").insert([payload]);
+        if (error) throw error;
+        alert("✅ تمت إضافة السجل بنجاح!");
+      }
 
-      if (error) throw error;
-
-      alert("✅ تم إضافة المشروع بنجاح!");
       setItemInput({
+        project_id: selectedProjectId,
         name: "",
         description: "",
         image_url: "",
@@ -120,105 +155,25 @@ const ProDashboard = () => {
       });
       fetchAllData();
     } catch (error) {
-      console.error("❌ خطأ:", error);
       alert("❌ خطأ: " + error.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // ===== إضافة للمعرض (مرتبط بالمشروع + category) =====
-  const addPortfolio = async () => {
-    if (!portfolioInput.project_id) {
-      alert("⚠️ يرجى اختيار المشروع");
-      return;
-    }
-
-    if (
-      !portfolioInput.description.trim() ||
-      !portfolioInput.image_url.trim()
-    ) {
-      alert("⚠️ يرجى ملء جميع الحقول");
-      return;
-    }
-
-    try {
-      setLoading(true);
-      console.log("🖼️ جاري إضافة صورة للمعرض...");
-
-      const { error } = await supabase.from("portfolios").insert([
-        {
-          project_id: parseInt(portfolioInput.project_id),
-          description: portfolioInput.description,
-          image_url: portfolioInput.image_url,
-          category: portfolioInput.category, // ✅ حفظ الفئة
-        },
-      ]);
-
-      if (error) throw error;
-
-      alert("✅ تم إضافة الصورة بنجاح!");
-      setPortfolioInput({
-        project_id: null,
-        description: "",
-        image_url: "",
-        category: "Brand Identity",
-      });
-      fetchAllData();
-    } catch (error) {
-      console.error("❌ خطأ:", error);
-      alert("❌ خطأ: " + error.message);
-    } finally {
-      setLoading(false);
-    }
+  const startEditItem = (item) => {
+    setEditingItemId(item.id);
+    setItemInput({
+      project_id: selectedProjectId,
+      name: item.name || "",
+      description: item.description || "",
+      image_url: item.image_url || "",
+      hero_image: item.hero_image || "",
+      category: item.category || "Brand Identity",
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  // ===== إضافة ملف PDF (مرتبط بالمشروع + category) =====
-  const addPdf = async () => {
-    if (!pdfInput.project_id) {
-      alert("⚠️ يرجى اختيار المشروع");
-      return;
-    }
-
-    if (!pdfInput.title.trim() || !pdfInput.file_url.trim()) {
-      alert("⚠️ يرجى ملء جميع الحقول المطلوبة");
-      return;
-    }
-
-    try {
-      setLoading(true);
-      console.log("📄 جاري إضافة ملف PDF...");
-
-      const { error } = await supabase.from("pdfs").insert([
-        {
-          project_id: parseInt(pdfInput.project_id),
-          title: pdfInput.title,
-          file_url: pdfInput.file_url,
-          preview_image: pdfInput.preview_image || null,
-          category: pdfInput.category, // ✅ حفظ الفئة
-        },
-      ]);
-
-      if (error) throw error;
-
-      alert("✅ تم إضافة الملف بنجاح!");
-      setPdfInput({
-        project_id: null,
-        title: "",
-        file_url: "",
-        preview_image: "",
-        category: "Brand Identity",
-      });
-      fetchAllData();
-    } catch (error) {
-      console.error("❌ خطأ:", error);
-      alert("❌ خطأ: " + error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ===== حذف =====
   const deleteItem = async (table, id) => {
     if (!window.confirm("⚠️ هل أنت متأكد من حذف هذا العنصر؟")) return;
 
@@ -229,7 +184,6 @@ const ProDashboard = () => {
       alert("✅ تم الحذف بنجاح!");
       fetchAllData();
     } catch (error) {
-      console.error("❌ خطأ:", error);
       alert("❌ خطأ: " + error.message);
     } finally {
       setLoading(false);
@@ -237,392 +191,141 @@ const ProDashboard = () => {
   };
 
   return (
-    <div
-      className="min-h-screen bg-gradient-to-br text-white space-y-8 p-6"
-      dir="rtl"
-    >
-      <div className="max-w-6xl mx-auto">
-     
-        <div className="relative flex flex-col items-center py-12 mb-12 rounded-[2rem] bg-[#0a0a0a] border border-white/5 shadow-2xl overflow-hidden">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-96 h-32 bg-blue-500/10 blur-[80px]" />
-        <h1 className="text-4xl font-black text-white mb-4 relative z-10">
-  لوحة تحكم المشاريع{" "}
-        </h1>
-        <p className="text-gray-400 text-xs uppercase tracking-[0.3em] bg-white/5 px-4 py-1 rounded-full border border-white/5">
-إدارة مشاريعك والمعرض والملفات
+    <div className="min-h-screen text-white space-y-10 p-4 sm:p-8" dir="rtl">
+      <div className="max-w-7xl mx-auto space-y-8">
+        
+        {/* العنوان */}
+        <div className="flex flex-col items-center py-10 px-6 rounded-3xl bg-[#121216] border border-blue-500/20 text-center shadow-xl">
+          <div className="p-3 bg-blue-500/10 text-blue-400 rounded-2xl border border-blue-500/20 mb-3">
+            <LayoutDashboard size={28} />
+          </div>
+          <h1 className="text-3xl font-black text-white mb-2">
+            لوحة إدارة تفاصيل المشروع <span className="text-blue-400">(المعرف: {selectedProjectId})</span>
+          </h1>
+          <p className="text-stone-400 text-sm flex items-center gap-1.5">
+            <Sparkles size={14} className="text-blue-400" /> اختر المشروع المراد إدارته وعرض تفاصيله مباشرة
+          </p>
+        </div>
 
-        </p>
-      </div>
-
-        {/* ===== قسم المشاريع الأساسية ===== */}
-        <section className="bg-[#0a0a0a] p-8 rounded-3xl border border-white/10 mb-8">
-          <h2 className="text-2xl font-bold mb-8 text-blue-400 flex items-center gap-3">
-            <LayoutDashboard size={28} /> المشاريع الأساسية
+        {/* نموذج الإضافة والتعديل */}
+        <div className="bg-[#121216] p-6 sm:p-8 rounded-3xl border border-white/10 space-y-6 shadow-2xl">
+          <h2 className="text-xl font-bold text-white flex items-center gap-2.5 pb-4 border-b border-white/5">
+            <LayoutDashboard size={20} className="text-blue-400" /> 
+            {editingItemId ? "تعديل بيانات السجل الحالي" : "إضافة سجل جديد للمشروع المختار"}
           </h2>
 
-          <div className="bg-[#111111] p-8 rounded-2xl border border-white/5 mb-8">
-            <h3 className="text-lg font-bold mb-4 text-blue-300">
-              إضافة مشروع جديد
-            </h3>
-            <div className="grid gap-4">
+          <div className="space-y-5">
+            
+            {/* القائمة المنسدلة لاختيار الـ ID واسم المشروع من قاعدة البيانات */}
+            <div>
+              <label className="text-stone-300 text-sm mb-1.5 block font-semibold">
+                اختر المشروع (Project ID & Name) <span className="text-blue-400">*</span>
+              </label>
+              <select
+                value={selectedProjectId}
+                onChange={handleProjectChange}
+                className="w-full bg-black p-4 rounded-xl border border-white/10 text-white outline-none cursor-pointer focus:border-blue-500 transition"
+              >
+                {projects.map((proj) => (
+                  <option key={proj.id} value={proj.id} className="bg-black text-white">
+                    ID: {proj.id} - {proj.title || "مشروع بدون عنوان"}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs text-stone-500 mt-1 block">يتم جلب هذه القائمة مباشرة من جدول المشاريع في قاعدة البيانات.</span>
+            </div>
+
+            {/* اسم العنصر / القسم */}
+            <div>
+              <label className="text-stone-300 text-sm mb-1.5 block font-semibold">اسم العنصر / القسم الفرعي <span className="text-blue-400">*</span></label>
               <input
                 type="text"
-                placeholder="اسم المشروع *"
+                placeholder="مثال: الهوية البصرية..."
                 value={itemInput.name}
-                onChange={(e) =>
-                  setItemInput({ ...itemInput, name: e.target.value })
-                }
-                className="bg-[#0a0a0a] p-3 rounded-xl border border-white/10 text-white focus:border-blue-500 focus:outline-none"
+                onChange={(e) => setItemInput({ ...itemInput, name: e.target.value })}
+                className="w-full bg-black p-4 rounded-xl border border-white/10 text-white outline-none focus:border-blue-500 transition"
               />
+            </div>
 
+            {/* الوصف */}
+            <div>
+              <label className="text-stone-300 text-sm mb-1.5 block font-semibold">الوصف <span className="text-blue-400">*</span></label>
               <textarea
-                placeholder="وصف المشروع *"
+                placeholder="اكتب وصفاً تفصيلياً..."
                 value={itemInput.description}
-                onChange={(e) =>
-                  setItemInput({ ...itemInput, description: e.target.value })
-                }
-                className="bg-[#0a0a0a] p-3 rounded-xl border border-white/10 text-white focus:border-blue-500 focus:outline-none min-h-24"
+                onChange={(e) => setItemInput({ ...itemInput, description: e.target.value })}
+                className="w-full bg-black p-4 rounded-xl border border-white/10 text-white outline-none focus:border-blue-500 min-h-[120px] resize-none transition"
               />
+            </div>
 
+            {/* رفع الصورة */}
+            <div>
+              <label className="text-stone-300 text-sm mb-1.5 block font-semibold">صورة القسم الرئيسية <span className="text-blue-400">*</span></label>
               <input
-                type="url"
-                placeholder="رابط الصورة الرئيسية *"
-                value={itemInput.image_url}
-                onChange={(e) =>
-                  setItemInput({ ...itemInput, image_url: e.target.value })
-                }
-                className="bg-[#0a0a0a] p-3 rounded-xl border border-white/10 text-white focus:border-blue-500 focus:outline-none"
+                type="file"
+                accept="image/*"
+                onChange={(e) => uploadFileToSupabase(e, setUploadingItemImg, (url) => setItemInput({ ...itemInput, image_url: url }))}
+                className="w-full bg-black p-3.5 rounded-xl border border-white/10 text-stone-400 text-sm cursor-pointer hover:border-blue-500/50 transition"
               />
+              {itemInput.image_url && <p className="text-xs text-emerald-400 mt-1.5 font-medium">تم رفع الصورة بنجاح ✅</p>}
+            </div>
 
-              <input
-                type="url"
-                placeholder="رابط صورة البطل - اختياري"
-                value={itemInput.hero_image}
-                onChange={(e) =>
-                  setItemInput({ ...itemInput, hero_image: e.target.value })
-                }
-                className="bg-[#0a0a0a] p-3 rounded-xl border border-white/10 text-white focus:border-blue-500 focus:outline-none"
-              />
-
+            {/* التصنيف (Brand Identity وغيرها) */}
+            <div>
+              <label className="text-stone-300 text-sm mb-1.5 block font-semibold">التصنيف (Category)</label>
               <select
                 value={itemInput.category}
-                onChange={(e) =>
-                  setItemInput({ ...itemInput, category: e.target.value })
-                }
-                className="bg-[#0a0a0a] p-3 rounded-xl border border-white/10 text-white focus:border-blue-500 focus:outline-none"
+                onChange={(e) => setItemInput({ ...itemInput, category: e.target.value })}
+                className="w-full bg-black p-4 rounded-xl border border-white/10 text-white outline-none cursor-pointer focus:border-blue-500 transition"
               >
                 {categories.map((cat) => (
-                  <option key={cat} value={cat}>
-                    {cat}
-                  </option>
+                  <option key={cat} value={cat} className="bg-black text-white">{cat}</option>
                 ))}
               </select>
-
-              <button
-                onClick={addItem}
-                disabled={loading}
-                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 p-3 rounded-xl font-bold transition-all flex items-center justify-center gap-2"
-              >
-                <Plus size={20} /> إضافة مشروع
-              </button>
             </div>
-          </div>
 
-          {/* قائمة المشاريع */}
-          <div className="space-y-3">
-            <h3 className="text-lg font-bold text-blue-300 mb-4">
-              المشاريع المضافة ({items.length})
-            </h3>
-            {items.length > 0 ? (
-              items.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex justify-between items-start bg-[#111111] p-4 rounded-xl border border-white/5 hover:border-white/10 transition-all"
-                >
-                  <div className="flex-1">
-                    <h4 className="font-bold text-white">
-                      {item.name}
-                      <span className="text-blue-400 text-xs ml-2">
-                        (ID: {item.id})
-                      </span>
-                    </h4>
-                    <p className="text-xs text-stone-400 mt-1">
-                      {item.description}
-                    </p>
-                    <span className="text-orange-500 text-xs mt-2 inline-block">
-                      {item.category}
-                    </span>
+            {/* زر الحفظ */}
+            <button
+              onClick={handleSaveItem}
+              disabled={loading}
+              className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold flex items-center justify-center gap-2.5 shadow-lg shadow-blue-600/30 transition"
+            >
+              {loading ? <Loader2 className="animate-spin" size={20} /> : <Plus size={20} />}
+              <span>{editingItemId ? "تحديث السجل الحالي" : "حفظ وإضافة السجل الجديد"}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* عرض العناصر الحالية */}
+        <div className="space-y-4">
+          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+            <ImageIcon size={18} className="text-blue-400" /> العناصر المسجلة للمشروع (ID: {selectedProjectId}): {items.length}
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {items.map((item) => (
+              <div key={item.id} className="bg-[#121216] p-5 rounded-2xl border border-white/10 flex flex-col justify-between gap-4 shadow-xl hover:border-blue-500/30 transition">
+                {item.image_url && <img src={item.image_url} alt={item.name} className="w-full h-44 object-cover rounded-xl border border-white/5" />}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs bg-blue-500/20 text-blue-300 px-2.5 py-0.5 rounded-full font-bold">{item.category}</span>
+                    <span className="text-xs text-stone-500">ID: {item.id}</span>
                   </div>
-                  <button
-                    onClick={() => deleteItem("items", item.id)}
-                    disabled={loading}
-                    className="text-red-500 hover:text-red-400 transition-colors"
-                  >
-                    <Trash2 size={18} />
+                  <h4 className="font-bold text-lg text-white">{item.name}</h4>
+                  <p className="text-xs text-stone-400 line-clamp-2">{item.description}</p>
+                </div>
+                <div className="flex gap-2 pt-3 border-t border-white/5">
+                  <button onClick={() => startEditItem(item)} className="flex-1 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition">
+                    <Edit3 size={15} /> تعديل
+                  </button>
+                  <button onClick={() => deleteItem("items", item.id)} className="py-2.5 px-4 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition">
+                    <Trash2 size={15} /> حذف
                   </button>
                 </div>
-              ))
-            ) : (
-              <p className="text-stone-400 text-center py-4">
-                لا توجد مشاريع بعد
-              </p>
-            )}
+              </div>
+            ))}
           </div>
-        </section>
+        </div>
 
-        {/* ===== قسم المعرض ===== */}
-        <section className="bg-[#0a0a0a] p-8 rounded-3xl border border-white/10 mb-8">
-          <h2 className="text-2xl font-bold mb-8 text-emerald-400 flex items-center gap-3">
-            <Image size={28} /> معرض المشاريع
-          </h2>
-
-          <div className="bg-[#111111] p-8 rounded-2xl border border-white/5 mb-8">
-            <h3 className="text-lg font-bold mb-4 text-emerald-300">
-              إضافة صورة للمعرض
-            </h3>
-            <div className="grid gap-4">
-              <select
-                value={portfolioInput.project_id || ""}
-                onChange={(e) =>
-                  setPortfolioInput({
-                    ...portfolioInput,
-                    project_id: e.target.value,
-                  })
-                }
-                className="bg-[#0a0a0a] p-3 rounded-xl border border-white/10 text-white focus:border-emerald-500 focus:outline-none"
-              >
-                <option value="">اختر المشروع *</option>
-                {items.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name} (ID: {item.id})
-                  </option>
-                ))}
-              </select>
-
-              <input
-                type="url"
-                placeholder="رابط الصورة *"
-                value={portfolioInput.image_url}
-                onChange={(e) =>
-                  setPortfolioInput({
-                    ...portfolioInput,
-                    image_url: e.target.value,
-                  })
-                }
-                className="bg-[#0a0a0a] p-3 rounded-xl border border-white/10 text-white focus:border-emerald-500 focus:outline-none"
-              />
-
-              <textarea
-                placeholder="وصف الصورة *"
-                value={portfolioInput.description}
-                onChange={(e) =>
-                  setPortfolioInput({
-                    ...portfolioInput,
-                    description: e.target.value,
-                  })
-                }
-                className="bg-[#0a0a0a] p-3 rounded-xl border border-white/10 text-white focus:border-emerald-500 focus:outline-none min-h-20"
-              />
-
-              {/* ✅ حقل الفئة للمعرض */}
-              <select
-                value={portfolioInput.category}
-                onChange={(e) =>
-                  setPortfolioInput({
-                    ...portfolioInput,
-                    category: e.target.value,
-                  })
-                }
-                className="bg-[#0a0a0a] p-3 rounded-xl border border-white/10 text-white focus:border-emerald-500 focus:outline-none"
-              >
-                {categories.map((cat) => (
-                  <option key={cat} value={cat}>
-                    {cat}
-                  </option>
-                ))}
-              </select>
-
-              <button
-                onClick={addPortfolio}
-                disabled={loading}
-                className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 p-3 rounded-xl font-bold transition-all flex items-center justify-center gap-2"
-              >
-                <Plus size={20} /> إضافة للمعرض
-              </button>
-            </div>
-          </div>
-
-          {/* قائمة المعرض */}
-          <div className="space-y-3">
-            <h3 className="text-lg font-bold text-emerald-300 mb-4">
-              الصور المضافة ({portfolios.length})
-            </h3>
-            {portfolios.length > 0 ? (
-              portfolios.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex justify-between items-start bg-[#111111] p-4 rounded-xl border border-white/5 hover:border-white/10 transition-all"
-                >
-                  <div className="flex-1">
-                    <h4 className="font-bold text-white">
-                      {item.description}
-                      <span className="text-emerald-400 text-xs ml-2">
-                        (Project ID: {item.project_id})
-                      </span>
-                    </h4>
-                    <span className="text-orange-500 text-xs mt-2 inline-block">
-                      {item.category}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => deleteItem("portfolios", item.id)}
-                    disabled={loading}
-                    className="text-red-500 hover:text-red-400 transition-colors"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </div>
-              ))
-            ) : (
-              <p className="text-stone-400 text-center py-4">لا توجد صور بعد</p>
-            )}
-          </div>
-        </section>
-
-        {/* ===== قسم ملفات PDF ===== */}
-        <section className="bg-[#0a0a0a] p-8 rounded-3xl border border-white/10">
-          <h2 className="text-2xl font-bold mb-8 text-purple-400 flex items-center gap-3">
-            <FileText size={28} /> ملفات PDF
-          </h2>
-
-          <div className="bg-[#111111] p-8 rounded-2xl border border-white/5 mb-8">
-            <h3 className="text-lg font-bold mb-4 text-purple-300">
-              إضافة ملف PDF
-            </h3>
-            <div className="grid gap-4">
-              <select
-                value={pdfInput.project_id || ""}
-                onChange={(e) =>
-                  setPdfInput({
-                    ...pdfInput,
-                    project_id: e.target.value,
-                  })
-                }
-                className="bg-[#0a0a0a] p-3 rounded-xl border border-white/10 text-white focus:border-purple-500 focus:outline-none"
-              >
-                <option value="">اختر المشروع *</option>
-                {items.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name} (ID: {item.id})
-                  </option>
-                ))}
-              </select>
-
-              <input
-                type="text"
-                placeholder="عنوان الملف *"
-                value={pdfInput.title}
-                onChange={(e) =>
-                  setPdfInput({ ...pdfInput, title: e.target.value })
-                }
-                className="bg-[#0a0a0a] p-3 rounded-xl border border-white/10 text-white focus:border-purple-500 focus:outline-none"
-              />
-
-              <input
-                type="url"
-                placeholder="رابط ملف PDF *"
-                value={pdfInput.file_url}
-                onChange={(e) =>
-                  setPdfInput({ ...pdfInput, file_url: e.target.value })
-                }
-                className="bg-[#0a0a0a] p-3 rounded-xl border border-white/10 text-white focus:border-purple-500 focus:outline-none"
-              />
-
-              <input
-                type="url"
-                placeholder="رابط صورة المعاينة - اختياري"
-                value={pdfInput.preview_image}
-                onChange={(e) =>
-                  setPdfInput({ ...pdfInput, preview_image: e.target.value })
-                }
-                className="bg-[#0a0a0a] p-3 rounded-xl border border-white/10 text-white focus:border-purple-500 focus:outline-none"
-              />
-
-              {/* ✅ حقل الفئة للـ PDF */}
-              <select
-                value={pdfInput.category}
-                onChange={(e) =>
-                  setPdfInput({
-                    ...pdfInput,
-                    category: e.target.value,
-                  })
-                }
-                className="bg-[#0a0a0a] p-3 rounded-xl border border-white/10 text-white focus:border-purple-500 focus:outline-none"
-              >
-                {categories.map((cat) => (
-                  <option key={cat} value={cat}>
-                    {cat}
-                  </option>
-                ))}
-              </select>
-
-              <button
-                onClick={addPdf}
-                disabled={loading}
-                className="bg-purple-600 hover:bg-purple-700 disabled:bg-purple-400 p-3 rounded-xl font-bold transition-all flex items-center justify-center gap-2"
-              >
-                <Plus size={20} /> إضافة PDF
-              </button>
-            </div>
-          </div>
-
-          {/* قائمة الـ PDF */}
-          <div className="space-y-3">
-            <h3 className="text-lg font-bold text-purple-300 mb-4">
-              الملفات المضافة ({pdfs.length})
-            </h3>
-            {pdfs.length > 0 ? (
-              pdfs.map((doc) => (
-                <div
-                  key={doc.id}
-                  className="flex justify-between items-start bg-[#111111] p-4 rounded-xl border border-white/5 hover:border-white/10 transition-all"
-                >
-                  <div className="flex-1">
-                    <h4 className="font-bold text-white">
-                      {doc.title}
-                      <span className="text-purple-400 text-xs ml-2">
-                        (Project ID: {doc.project_id})
-                      </span>
-                    </h4>
-                    <span className="text-orange-500 text-xs mt-2 inline-block">
-                      {doc.category}
-                    </span>
-                    <br />
-                    <a
-                      href={doc.file_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-blue-400 hover:underline mt-1 block"
-                    >
-                      فتح الملف
-                    </a>
-                  </div>
-                  <button
-                    onClick={() => deleteItem("pdfs", doc.id)}
-                    disabled={loading}
-                    className="text-red-500 hover:text-red-400 transition-colors"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </div>
-              ))
-            ) : (
-              <p className="text-stone-400 text-center py-4">
-                لا توجد ملفات بعد
-              </p>
-            )}
-          </div>
-        </section>
       </div>
     </div>
   );

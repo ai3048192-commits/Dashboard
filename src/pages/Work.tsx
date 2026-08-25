@@ -1,324 +1,306 @@
+// استبدل محتوى Work.tsx بهذا الكود المحدث
 import React, { useEffect, useState } from "react";
-import { Image, Trash2, Edit } from "lucide-react";
+import { Image, Trash2, Edit, Upload, Loader2, History, Activity } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 
 const ProGraphicDashboard = () => {
   const [portfolios, setPortfolios] = useState([]);
+  const [uploading, setUploading] = useState(false);
   const [newPort, setNewPort] = useState({
-    id: null,
+    id: "", 
     title: "",
     desc: "",
     img: "",
+    category: "Brand Identity",
+    isEditing: false,
   });
 
+  const [logs, setLogs] = useState([]);
+
+  const categories = [
+    "Brand Identity",
+    "Social Media Design",
+    "Print Design",
+    "Packaging Design",
+    "Photo Manipulation",
+    "Presentation Design",
+  ];
+
+  const logAction = async (actionText) => {
+    const newLog = {
+      id: Date.now(),
+      action: actionText,
+      time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
+    };
+    setLogs((prev) => [newLog, ...prev]);
+  };
+
   const fetchPortfolios = async () => {
-    const { data, error } = await supabase
-      .from("portfolio_projects")
-      .select("*");
+    const { data } = await supabase.from("portfolio_projects").select("*");
     if (data) setPortfolios(data);
   };
 
   useEffect(() => {
     fetchPortfolios();
+    fetchPartners();
   }, []);
 
-  const savePortfolio = async () => {
-    if (!newPort.title || !newPort.img) return alert("يرجى إكمال البيانات!");
+  const handleImageUpload = async (e) => {
+    try {
+      setUploading(true);
+      const file = e.target.files[0];
+      if (!file) return;
 
-    if (newPort.id) {
-      // عملية تعديل (Update)
-      await supabase
-        .from("portfolio_projects")
-        .update({
-          title: newPort.title,
-          description: newPort.desc,
-          image_url: newPort.img,
-        })
-        .eq("id", newPort.id);
-    } else {
-      // عملية إضافة (Insert)
-      await supabase.from("portfolio_projects").insert([
-        {
-          title: newPort.title,
-          description: newPort.desc,
-          image_url: newPort.img,
-        },
-      ]);
+      const fileExt = file.name.split(".").pop();
+      const fileName = `${Math.random()}.${fileExt}`;
+      const filePath = `portfolio-images/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("portfolio-bucket")
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage
+        .from("portfolio-bucket")
+        .getPublicUrl(filePath);
+
+      setNewPort({ ...newPort, img: data.publicUrl });
+      alert("✅ تم رفع الصورة بنجاح!");
+    } catch (error) {
+      alert("❌ خطأ أثناء رفع الصورة: " + error.message);
+    } finally {
+      setUploading(false);
     }
-    setNewPort({ id: null, title: "", desc: "", img: "" });
+  };
+
+  const savePortfolio = async () => {
+    if (!newPort.title || !newPort.img) return alert("يرجى إكمال البيانات ورفع الصورة!");
+
+    const portfolioData = {
+      title: newPort.title,
+      description: newPort.desc,
+      image_url: newPort.img,
+      category: newPort.category,
+    };
+
+    let savedId = newPort.id;
+
+    if (newPort.id && !isNaN(newPort.id)) {
+      const customId = parseInt(newPort.id);
+      portfolioData.id = customId;
+
+      if (newPort.isEditing) {
+        await supabase
+          .from("portfolio_projects")
+          .update(portfolioData)
+          .eq("id", customId);
+        logAction(`تم تعديل المشروع: ${newPort.title}`);
+      } else {
+        const { error } = await supabase.from("portfolio_projects").insert([portfolioData]);
+        if (error) {
+          alert("خطأ في إضافة الـ ID: " + error.message);
+          return;
+        }
+        logAction(`تم إضافة مشروع جديد برقم ID: ${customId} (${newPort.title})`);
+      }
+    } else {
+      // إدخال بدون ID محدد ودعه يتولد تلقائياً مع جلب الـ ID الجديد
+      const { data, error } = await supabase.from("portfolio_projects").insert([portfolioData]).select();
+      if (error) {
+        alert("خطأ في إضافة المشروع: " + error.message);
+        return;
+      }
+      if (data && data.length > 0) {
+        savedId = data[0].id;
+      }
+      logAction(`تم إضافة مشروع جديد: ${newPort.title}`);
+    }
+
+    // حفظ الـ ID في localStorage لتوحيده في كل الملفات Details و PortfolioAndPdfForm
+    if (savedId) {
+      localStorage.setItem("selectedProjectId", savedId);
+    }
+
+    setNewPort({ id: "", title: "", desc: "", img: "", category: "Brand Identity", isEditing: false });
     fetchPortfolios();
+    alert("✅ تم الحفظ بنجاح وتحديث الموقع وتثبيت الـ ID في النظام!");
   };
 
   const deletePortfolio = async (id) => {
+    if (!confirm("هل أنت متأكد من الحذف؟")) return;
     await supabase.from("portfolio_projects").delete().eq("id", id);
+    logAction(`تم حذف المشروع برقم ID: ${id}`);
     fetchPortfolios();
   };
 
   const [partners, setPartners] = useState([]);
   const [name, setName] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
-  const [editingId, setEditingId] = useState(null); // لتحديد هل نحن في وضع تعديل
+  const [editingId, setEditingId] = useState(null);
 
-  // جلب البيانات من Supabase
   const fetchPartners = async () => {
     const { data } = await supabase.from("partners").select("*");
     if (data) setPartners(data);
   };
 
-  useEffect(() => {
-    fetchPartners();
-  }, []);
+  const handlePartnerLogoUpload = async (e) => {
+    try {
+      const file = e.target.files[0];
+      if (!file) return;
+      const fileExt = file.name.split(".").pop();
+      const fileName = `partner-${Math.random()}.${fileExt}`;
+      const filePath = `partners-logos/${fileName}`;
 
-  // إضافة أو تعديل شريك
-  const handleSubmit = async () => {
-    if (!name || !logoUrl) return alert("يرجى تعبئة الحقول");
+      const { error: uploadError } = await supabase.storage
+        .from("portfolio-bucket")
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage
+        .from("portfolio-bucket")
+        .getPublicUrl(filePath);
+
+      setLogoUrl(data.publicUrl);
+      alert("✅ تم رفع شعار الشريك بنجاح!");
+    } catch (error) {
+      alert("❌ خطأ أثناء رفع الشعار: " + error.message);
+    }
+  };
+
+  const handleSubmitPartner = async () => {
+    if (!name || !logoUrl) return alert("يرجى تعبئة الحقول ورفع الشعار");
 
     if (editingId) {
-      // وضع التعديل
       await supabase
         .from("partners")
         .update({ name, logo_url: logoUrl })
         .eq("id", editingId);
+      logAction(`تم تعديل بيانات الشريك: ${name}`);
       setEditingId(null);
     } else {
-      // وضع الإضافة
       await supabase.from("partners").insert([{ name, logo_url: logoUrl }]);
+      logAction(`تم إضافة شريك جديد: ${name}`);
     }
 
     setName("");
     setLogoUrl("");
     fetchPartners();
+    alert("✅ تم حفظ الشريك بنجاح!");
   };
 
-  // حذف شريك
-  const handleDelete = async (id) => {
-    if (!confirm("هل أنت متأكد؟")) return;
+  const deletePartner = async (id) => {
+    if (!confirm("هل أنت متأكد من حذف هذا الشريك؟")) return;
     await supabase.from("partners").delete().eq("id", id);
+    logAction(`تم حذف الشريك برقم ID: ${id}`);
     fetchPartners();
   };
 
-  // تجهيز البيانات للتعديل
-  const startEdit = (p) => {
+  const startEditPartner = (p) => {
     setEditingId(p.id);
     setName(p.name);
     setLogoUrl(p.logo_url);
   };
 
   return (
-    <div className="== max-w-9xl text-white  space-y-12">
-      <div className="relative flex flex-col items-center py-16 mb-12 rounded-[1rem] bg-[#0a0a0a] border border-white/5 shadow-2xl overflow-hidden">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-96 h-32 bg-blue-500/10 blur-[80px]" />
-
-        <h1 className="text-4xl md:text-5xl font-black text-white mb-4 tracking-tight relative z-10">
-          أعمالنا الإبداعية
-        </h1>
-
-        <div className="flex items-center gap-2 mb-6">
-          <div className="h-[2px] w-8 bg-blue-500 rounded-full" />
-          <div className="h-[2px] w-2 bg-blue-400 rounded-full" />
-          <div className="h-[2px] w-2 bg-blue-300 rounded-full" />
-        </div>
-
-        <p className="text-gray-400 font-medium text-xs uppercase tracking-[0.3em] bg-white/5 px-4 py-1 rounded-full border border-white/5">
-          مساحة لعرض مشاريعنا المختارة
-        </p>
-      </div>
-      
-      <section className="max-w-7xl mx-auto p-6 md:p-12">
-      
-        {/* الفورم: تصميم بطاقة عائمة */}
-        <div className="bg-[#0a0a0a]  backdrop-blur-xl p-8 rounded-3xl border border-white/10 shadow-2xl mb-12">
-          <div className="flex items-center gap-4 mb-8">
-            <div className="p-3 bg-blue-500/20 rounded-2xl text-blue-400">
-              <Edit size={24} />
-            </div>
-            <h3 className="text-xl font-bold text-white">
-              {newPort.id ? "تعديل العمل الحالي" : "إضافة عمل جديد"}
-            </h3>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <input
-              placeholder="رابط الصورة (URL)"
-              value={newPort.img}
-              onChange={(e) => setNewPort({ ...newPort, img: e.target.value })}
-              className="bg-[#0a0a0a] p-4 rounded-xl border border-white/10 text-white focus:border-blue-500 outline-none transition"
-            />
-            <input
-              placeholder="عنوان المشروع"
-              value={newPort.title}
-              onChange={(e) =>
-                setNewPort({ ...newPort, title: e.target.value })
-              }
-              className="bg-[#0a0a0a] p-4 rounded-xl border border-white/10 text-white focus:border-blue-500 outline-none transition"
-            />
-            <textarea
-              placeholder="وصف المشروع..."
-              value={newPort.desc}
-              onChange={(e) => setNewPort({ ...newPort, desc: e.target.value })}
-              className="md:col-span-2 bg-[#0a0a0a] p-4 rounded-xl border border-white/10 text-white focus:border-blue-500 outline-none transition h-24 resize-none"
-            />
-
-            <div className="md:col-span-2 flex gap-4">
-              <button
-                onClick={savePortfolio}
-                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition duration-300"
-              >
-                {newPort.id ? "حفظ التغييرات" : "إضافة العمل للمعرض"}
-              </button>
-              {newPort.id && (
-                <button
-                  onClick={() =>
-                    setNewPort({ id: null, title: "", desc: "", img: "" })
-                  }
-                  className="px-6 bg-[#1a1a1a] border border-white/10 hover:border-red-500/50 text-stone-400 rounded-xl transition"
-                >
-                  إلغاء
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* السجلات: تصميم شبكة (Grid) أنيقة */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {portfolios.map((item) => (
-            <div
-              key={item.id}
-              className="group bg-[#111111] rounded-3xl overflow-hidden border border-white/5 hover:border-white/20 transition-all duration-500 hover:-translate-y-2 hover:shadow-2xl"
-            >
-              <div className="relative h-56 overflow-hidden">
-                <img
-                  src={item.image_url}
-                  className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
-                  alt={item.title}
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-[#111111] to-transparent" />
+    <div className="max-w-9xl mx-auto p-6 text-white space-y-12" dir="rtl">
+      {/* بقية الواجهة الخاصة بـ Work */}
+      <div className="bg-[#0a0a0a] p-6 rounded-3xl border border-white/10 shadow-2xl space-y-4">
+        <h3 className="text-xl font-bold flex items-center gap-2 text-emerald-400">
+          <Activity size={20} /> سجل العمليات والنشاطات الحية
+        </h3>
+        <div className="bg-black p-4 rounded-2xl border border-white/5 max-h-48 overflow-y-auto space-y-2">
+          {logs.length === 0 ? (
+            <p className="text-stone-500 text-sm text-center py-2">لا توجد عمليات مسجلة حتى الآن في هذه الجلسة.</p>
+          ) : (
+            logs.map((log) => (
+              <div key={log.id} className="flex items-center justify-between text-sm py-2 px-3 bg-white/5 rounded-xl border border-white/5">
+                <span className="text-stone-200">{log.action}</span>
+                <span className="text-xs text-stone-400 bg-black/40 px-2 py-1 rounded-md">{log.time}</span>
               </div>
+            ))
+          )}
+        </div>
+      </div>
 
-              <div className="p-6">
-                <h3 className="text-lg font-bold text-white mb-2">
-                  {item.title}
-                </h3>
-                <p className="text-stone-400 text-sm line-clamp-2">
-                  {item.description}
-                </p>
+      <div className="bg-[#0a0a0a] p-8 rounded-3xl border border-white/10 shadow-2xl space-y-6">
+        <h3 className="text-2xl font-bold flex items-center gap-3">
+          <Edit className="text-blue-400" />
+          {newPort.isEditing ? "تعديل المشروع الحالي" : "إضافة مشروع جديد للمعرض"}
+        </h3>
 
-                <div className="flex gap-4 mt-6 pt-6 border-t border-white/5">
-                  <button
-                    onClick={() =>
-                      setNewPort({
-                        id: item.id,
-                        title: item.title,
-                        desc: item.description,
-                        img: item.image_url,
-                      })
-                    }
-                    className="text-blue-400 hover:text-blue-300 transition"
-                  >
-                    <Edit size={18} />
-                  </button>
-                  <button
-                    onClick={() => deletePortfolio(item.id)}
-                    className="text-red-400 hover:text-red-300 transition"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <input
+            type="number"
+            placeholder="معرف المشروع (ID) - اختياري"
+            value={newPort.id}
+            onChange={(e) => setNewPort({ ...newPort, id: e.target.value })}
+            className="bg-black p-4 rounded-xl border border-white/10 text-white outline-none"
+          />
+          <input
+            placeholder="عنوان المشروع"
+            value={newPort.title}
+            onChange={(e) => setNewPort({ ...newPort, title: e.target.value })}
+            className="bg-black p-4 rounded-xl border border-white/10 text-white outline-none"
+          />
+          <select
+            value={newPort.category}
+            onChange={(e) => setNewPort({ ...newPort, category: e.target.value })}
+            className="md:col-span-2 bg-black p-4 rounded-xl border border-white/10 text-white outline-none"
+          >
+            {categories.map((cat) => (
+              <option key={cat} value={cat}>{cat}</option>
+            ))}
+          </select>
+          <div className="md:col-span-2 bg-black p-4 rounded-xl border border-white/10 flex flex-col gap-2">
+            <label className="text-stone-400 text-sm">صورة المشروع:</label>
+            <label className="flex items-center justify-center gap-2 bg-blue-600/20 text-blue-400 p-4 rounded-xl cursor-pointer border border-blue-500/30">
+              {uploading ? <Loader2 className="animate-spin" size={20} /> : <Upload size={20} />}
+              <span>{uploading ? "جاري الرفع..." : "اختر ملف الصورة"}</span>
+              <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+            </label>
+            {newPort.img && <span className="text-xs text-emerald-400">✅ تم رفع الصورة بنجاح</span>}
+          </div>
+          <textarea
+            placeholder="وصف المشروع..."
+            value={newPort.desc}
+            onChange={(e) => setNewPort({ ...newPort, desc: e.target.value })}
+            className="md:col-span-2 bg-black p-4 rounded-xl border border-white/10 text-white h-24 resize-none outline-none"
+          />
+          <button
+            onClick={savePortfolio}
+          className="md:col-span-2 bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-bold text-white transition"
+          >
+            {newPort.isEditing ? "حفظ التعديلات" : "إضافة للموقع فوراً وتثبيت الـ ID"}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6 border-t border-white/10">
+          {portfolios.map((item) => (
+            <div key={item.id} className="bg-black p-4 rounded-2xl border border-white/10 space-y-3">
+              <img src={item.image_url} alt={item.title} className="w-full h-36 object-cover rounded-xl" />
+              <h4 className="font-bold text-white">{item.title} (ID: {item.id})</h4>
+              <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
+                <button
+                  onClick={() => setNewPort({ id: item.id, title: item.title, desc: item.description, img: item.image_url, category: item.category, isEditing: true })}
+                  className="text-blue-400 p-2 bg-blue-500/10 rounded-lg hover:bg-blue-500/20 transition"
+                >
+                  <Edit size={16} />
+                </button>
+                <button
+                  onClick={() => deletePortfolio(item.id)}
+                  className="text-red-400 p-2 bg-red-500/10 rounded-lg hover:bg-red-500/20 transition"
+                >
+                  <Trash2 size={16} />
+                </button>
               </div>
             </div>
           ))}
-        </div>
-      </section>
-      <div
-        className="w-full max-w-9xl mx-auto p-4 lg:p-8 min-h-screen"
-        dir="rtl"
-      >
-        <div className="bg-[#111111] p-8  max-w-9xl rounded-3xl border border-white/10 shadow-2xl mb-12 max-w-2xl mx-auto">
-          <h2 className="text-3xl font-bold mb-8 text-white">
-            {editingId ? "تعديل بيانات الشريك" : "إضافة شريك جديد"}
-          </h2>
-
-          <div className="space-y-4">
-            <input
-              className="w-full bg-[#1a1a1a] p-4 rounded-xl border border-white/10 focus:border-orange-500 outline-none text-white transition-all"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="اسم الشريك"
-            />
-            <input
-              className="w-full bg-[#1a1a1a] p-4 rounded-xl border border-white/10 focus:border-orange-500 outline-none text-white transition-all"
-              value={logoUrl}
-              onChange={(e) => setLogoUrl(e.target.value)}
-              placeholder="رابط الصورة (URL)"
-            />
-            <button
-              onClick={handleSubmit}
-              className="w-full bg-orange-600 hover:bg-orange-500 py-4 rounded-xl font-bold text-white transition-all transform hover:scale-[1.01] active:scale-[0.99]"
-            >
-              {editingId ? "حفظ التعديلات" : "إضافة للشركاء"}
-            </button>
-          </div>
-        </div>
-
-        {/* قسم السجلات - جدول واسع وعصري */}
-        <div className="bg-[#111111] rounded-3xl p-8 border border-white/10 overflow-hidden">
-          <h3 className="text-xl font-semibold mb-6 text-stone-400">
-            قائمة الشركاء الحاليين
-          </h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-right border-collapse">
-              <thead>
-                <tr className="text-stone-500 border-b border-white/10">
-                  <th className="p-4">الشعار</th>
-                  <th className="p-4">الاسم</th>
-                  <th className="p-4 text-left">تحكم</th>
-                </tr>
-              </thead>
-              <tbody>
-                {partners.map((p) => (
-                  <tr
-                    key={p.id}
-                    className="border-b border-white/5 hover:bg-white/5 transition-colors"
-                  >
-                    <td className="p-4">
-                      <div className="w-16 h-16 bg-white/5 rounded-xl flex items-center justify-center p-2 border border-white/5">
-                        <img
-                          src={p.logo_url}
-                          alt={p.name}
-                          className="w-full h-full object-contain"
-                          onError={(e) => {
-                            e.target.src =
-                              "https://via.placeholder.com/48?text=Error";
-                          }}
-                        />
-                      </div>
-                    </td>
-                    <td className="p-4 font-bold text-lg text-white">
-                      {p.name}
-                    </td>
-                    <td className="p-4 flex gap-4">
-                      <button
-                        onClick={() => startEdit(p)}
-                        className="px-4 py-2 bg-blue-500/10 text-blue-400 rounded-lg hover:bg-blue-500/20 transition-all"
-                      >
-                        تعديل
-                      </button>
-                      <button
-                        onClick={() => handleDelete(p.id)}
-                        className="px-4 py-2 bg-red-500/10 text-red-400 rounded-lg hover:bg-red-500/20 transition-all"
-                      >
-                        حذف
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
         </div>
       </div>
     </div>
   );
 };
+
 export default ProGraphicDashboard;
