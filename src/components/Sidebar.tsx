@@ -1,15 +1,17 @@
-import {
-  LayoutGrid,
-  User,
-  Palette,
-  Briefcase,
-  Award,
-  Settings,
-  LogOut,
-  X,
-  PenTool,
-  ClipboardList,
-  Globe,
+import { 
+  LayoutGrid, 
+  User, 
+  Palette, 
+  Briefcase, 
+  Award, 
+  Settings, 
+  LogOut, 
+  X, 
+  PenTool, 
+  ClipboardList, 
+  Globe, 
+  Handshake, // مخصصة لشريك النجاح أو الشراكات
+  FileText   // ممتازة للتفاصيل أو المستندات
 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
@@ -27,7 +29,9 @@ const menuItems: MenuItem[] = [
   { name: "من أنا", icon: User, path: "/about" },
   { name: "خدماتي", icon: Palette, path: "/services" },
   { name: "أعمالي", icon: Briefcase, path: "/portfolio" },
-  { name: " التفاصيل اعمال ", icon: Award, path: "/partners" },
+  { name: "التفاصيل", icon: FileText, path: "/portfolio-and-pdf" },
+  { name: "شريك النجاح", icon: Handshake, path: "/clientsAndPartners" },
+  { name: "التفاصيل اعمال", icon: Award, path: "/partners" },
   { name: "الإعدادات", icon: Settings, path: "/settings" },
   { name: "العودة للموقع", icon: Globe, path: "https://samhan10.vercel.app/" },
 ];
