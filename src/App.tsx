@@ -9,6 +9,9 @@ import Services from "./pages/Services";
 import Work from "./pages/Work";
 import Details from "./pages/Details";
 import Settings from "./pages/Settings";
+import PortfolioAndPdfForm from "./pages/PortfolioAndPdfForm";
+import ClientsAndPartners
+ from "./pages/ClientsAndPartners";
 
 import "./index.css";
 
@@ -35,6 +38,11 @@ function App() {
               <Route path="/services" element={<Services />} />
               <Route path="/portfolio" element={<Work />} />
               <Route path="/partners" element={<Details />} />
+              <Route path="/portfolio-and-pdf" element={<PortfolioAndPdfForm />} />
+              <Route path="/clientsAndPartners" element={<ClientsAndPartners />} />
+
+
+
               <Route path="/settings" element={<Settings />} />
             </Routes>
           </main>
